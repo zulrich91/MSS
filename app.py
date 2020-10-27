@@ -6,8 +6,6 @@ from dash.dependencies import Input, Output, State, MATCH, ALL
 import dash_bootstrap_components as dbc
 import pandas as pd
 import flask
-#import dash_dangerously_set_inner_html
-#import dash_auth
 import json
 import plotly.graph_objs as go
 from io import BytesIO
@@ -50,15 +48,14 @@ spark = SparkSession \
 
 app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
-HERE = Path('/home/ulrich/Documents/dash-plotly/Masters2/dhifli/')
 PLOTLY_LOGO = "https://images.plot.ly/logo/new-branding/plotly-logomark.png"
-wordcloud = '/home/ulrich/Documents/dash-plotly/Masters2/dhifli/wordcloud.png' # replace with your own image
+wordcloud = 'wordcloud.png' # replace with your own image
 locations = pd.read_csv('locations.csv')
 sentiment_df = pd.read_csv('sentiment.csv')
 verif_df = pd.read_csv('verified_user.csv')
-device_df = pd.read_csv('/home/ulrich/Documents/dash-plotly/Masters2/dhifli/agg/device_spark.csv')
-polarity_label_df = pd.read_csv("/home/ulrich/Documents/dash-plotly/Masters2/dhifli/agg/polarity_label.csv")
-sub_label_df = pd.read_csv("/home/ulrich/Documents/dash-plotly/Masters2/dhifli/agg/subj_label.csv")
+device_df = pd.read_csv('./agg/device_spark.csv')
+polarity_label_df = pd.read_csv("./agg/polarity_label.csv")
+sub_label_df = pd.read_csv("./agg/subj_label.csv")
 encoded_image = base64.b64encode(open(wordcloud, 'rb').read())
 
 lda_out_file = 'lda.html'
@@ -846,10 +843,7 @@ def preprocess_data(contents,filename):
     results = html.P("Using Default data for the moment", style=dict(color='red'))
     if contents is not None:
         try:
-            #print(filename)
             df = parse_data(contents, filename)
-            #print(df.columns)
-            #print(df.shape)
             filen=filename
         except Exception as e:
             print('Exception:--{}-- in callback preprocess_data[1st exception]'.format(e))
@@ -1045,11 +1039,8 @@ def new_input_field(n_clicks, children,number_topics):
     if n_clicks <= number_topics-1:
         new_input = dcc.Input(id={'type': 'add-input-field',
                                 'index': n_clicks},
-                                placeholder='Rename Topic {}'.format(n_clicks)
-                                    )
+                                placeholder='Rename Topic {}'.format(n_clicks))
         children.append(new_input)
-        #print(new_dropdown.id)
-        #print(children)
         return children
     elif n_clicks > number_topics-1:
         #print("You can't rename more than {} topics".format(num_topics))
