@@ -38,7 +38,7 @@ from pyspark.sql import SparkSession
 import pyspark.sql.functions as psf
 from pyspark.sql.functions import udf, col, sum,mean
 from pyspark.sql.functions import sum as Fsum
-from pyspark.sql.types import StringType, StructType
+from pyspark.sql.types import StringType, StructType,FloatType
 from textblob import TextBlob
 
 spark = SparkSession \
@@ -134,7 +134,8 @@ additional_stop_words=['hrtechconf','peopleanalytics','hrtech','hr','hrconfes',
                        'best','happen','unlockpotentialpic','half','none',
                        'human', 'resources','truly','win','possible','thanks',
                        'know','check','visit','fun','give','think','forward',
-                       'twitter','com','pic','rt','via', 'chloroquine', 'hydroxychloroquine', 'https', 'http']
+                       'twitter','com','pic','rt','via', 'https', 'http',
+                       'corona', 'covid', 'virus',]
 
 cols = [color for name, color in mcolors.TABLEAU_COLORS.items()]
 
@@ -144,9 +145,9 @@ initial_topic_coordinates = pd.DataFrame()
 initial_token_table = pd.DataFrame()
 all_tweets_df = pd.DataFrame()
 cleaned_tweets_df = pd.DataFrame()
-polarity_topics_df = pd.DataFrame()
-topics_polarity_df = pd.DataFrame()
-topics_subj_df = pd.DataFrame()
+polarity_topics_df = pd.DataFrame() # contains tweet plus sentiment only
+topics_polarity_df = pd.DataFrame() # contains tweet and topic plus polarity and topic
+topics_subj_df = pd.DataFrame()    # contains tweet and topic plus subjectivity and topic
 renamed_topics_polarity_df = pd.DataFrame()
 renamed_topics_subj_df = pd.DataFrame()
 topics_names_exist = False
@@ -211,24 +212,11 @@ def topic_rename_f(topic):
         topic_name = 'Unknown Topic'
     return topic_name
 
-@psf.udf(StringType())
-def udf_get_sentiment(tweet):
+@psf.udf(FloatType())
+def udf_get_polarity(tweet):
     tweet_blob = TextBlob(str(tweet))
     sentiment = tweet_blob.sentiment
-    if sentiment.polarity > 0:
-        pol_label =  'positive'
-    elif sentiment.polarity == 0:
-        pol_label = 'neutral'
-    else:
-        pol_label = 'negative'
-
-    if sentiment.subjectivity > 0.5:
-        subj_label = 'subjective'
-    elif sentiment.subjectivity == 0.5:
-        subj_label = 'neutral'
-    else:
-        subj_label = 'objective'
-    return [pol_label,sentiment.polarity, subj_label, sentiment.subjectivity]
+    return sentiment.polarity
 
 @psf.udf(StringType())
 def udf_polarity_label(tweet):
@@ -241,13 +229,19 @@ def udf_polarity_label(tweet):
     else:
         return 'negative'
 
+@psf.udf(FloatType())
+def udf_get_subj(tweet):
+    tweet_blob = TextBlob(str(tweet))
+    sentiment = tweet_blob.sentiment
+    return sentiment.subjectivity
+
 @psf.udf(StringType())
 def udf_subj_label(tweet):
     tweet_blob = TextBlob(str(tweet))
     sentiment = tweet_blob.sentiment
-    if sentiment.polarity > 0.5:
+    if sentiment.subjectivity > 0.5:
         return 'subjective'
-    elif sentiment.polarity == 0.5:
+    elif sentiment.subjectivity == 0.5:
         return 'neutral'
     else:
         return 'objective'
@@ -577,7 +571,7 @@ app.layout = html.Div([
                             step=1,
                             marks={i: str(i) for i in range(5, 31)}),
                         dbc.Tooltip("You can vary this to show more or less terms in the wordcloud", target="term_des"),
-                        html.B(html.P('Slide to select ALPHA', id='alpha_des', style=dict(marginLeft=20, marginTop=5, marginBottom=5))),
+                        html.B(html.P('Slide to select the document-topic density (ALPHA)', id='alpha_des', style=dict(marginLeft=20, marginTop=5, marginBottom=5))),
                         html.P(id='alpha_output', style=dict(marginLeft=20, marginTop=5,marginBottom=5)),
 
                         dcc.Slider(
@@ -591,7 +585,7 @@ app.layout = html.Div([
                         dbc.Tooltip("Document-Topic Density. The greater, a document will be assigned to more topics, vice versa",
                                     target='alpha_des'),
 
-                        html.B(html.P('Slide to select ETA', id='eta_des',style=dict(marginLeft=20, marginTop=5, marginBottom=5))),
+                        html.B(html.P('Slide to select the topic-word density (ETA)', id='eta_des',style=dict(marginLeft=20, marginTop=5, marginBottom=5))),
 
                         html.P(id='eta_output', style=dict(marginLeft=20, marginTop=5, marginBottom=5)),
                         dcc.Slider(
@@ -647,7 +641,7 @@ app.layout = html.Div([
                                             marginTop=10,
                                             padding=10,
                                             display='none')),
-
+                        html.Div(id='eval_metrics'),
                         #html.A(html.Button("Visualize Topics"), href="/lda_vis", target="_blank"),
                     ], style=dict( width="500px", float='left')),
 
@@ -776,22 +770,22 @@ app.layout = html.Div([
                     html.Div([dcc.Dropdown(
                             id='sentiment_dropdown',
                             options=[{'label': i, 'value': i} for i in ["World", 'USA', 'France']],
-                            value='World',
-                            style={'marginLeft':'30px', "marginBottom":"5px",'width':'100%'}
-                            ),
-                            html.Div(id='sentiment_output')], style=dict( width="1500px", height="790px"))]),
-        dcc.Tab(label='User Mapping',
-                value='tab-4',
-                #style=tab_style,
-                selected_style=tab_selected_style,
-                children=[
-                    html.Div([
-                        dcc.Dropdown(
-                            id='user_mapping_dropdown',
-                            options=[{'label': i, 'value': i} for i in ['USA', 'France']],
                             value='USA',
-                            style={'marginLeft':'30px', "marginBottom":"5px",'width':'100%'}),
-                        html.Div(id='user_mapping_output')], style=dict( width="1500px", height="790px"))]),
+                            style={'marginLeft':'30px', "marginBottom":"2px",'width':'100%'}
+                            ),
+                            html.Div(id='sentiment_output')], style=dict( width="800px", height="300px"))]),
+        # dcc.Tab(label='Tweet Mapping',
+        #         value='tab-4',
+        #         #style=tab_style,
+        #         selected_style=tab_selected_style,
+        #         children=[
+        #             html.Div([
+        #                 dcc.Dropdown(
+        #                     id='user_mapping_dropdown',
+        #                     options=[{'label': i, 'value': i} for i in ['USA', 'France']],
+        #                     value='USA',
+        #                     style={'marginLeft':'30px', "marginBottom":"5px",'width':'100%'}),
+        #                 html.Div(id='user_mapping_output')], style=dict( width="1500px", height="790px"))]),
         # dcc.Tab(label='Personal Data',
         #         value='tab-6',
         #         selected_style=tab_selected_style,
@@ -845,7 +839,8 @@ app.layout = html.Div([
     Output('summary_source_tweets', 'children'),
     Output('summary_total_tweets', 'children'),
     Output('summary_size_dataframe', 'children'),
-    Output('summary_number_tweets_per_country', 'children'),],
+    #Output('summary_number_tweets_per_country', 'children'),
+    ],
     [Input('upload_your_data', 'contents'),Input('upload_your_data', 'filename')])
 def preprocess_data(contents,filename):
     results = html.P("Using Default data for the moment", style=dict(color='red'))
@@ -857,25 +852,35 @@ def preprocess_data(contents,filename):
             #print(df.shape)
             filen=filename
         except Exception as e:
-            print('Error:--{}-- in callback preprocess_data[1st exception]'.format(e))
+            print('Exception:--{}-- in callback preprocess_data[1st exception]'.format(e))
             results = html.P('Error {} '.format(e), style=dict(color='red'))
-    else:
-        print('Invalid content: -->{}<---....'.format(contents))
-        print('Reverting to the default dataset....')
-        results = html.P("Error. The text field should be named *text* \
-                          Using the default datas", style=dict(color='red'))
+    elif contents is None:
+        print('No dataset provided. Using default dataset for now....\n')
+        results = html.P("Using default dataset for the moment", style=dict(color='red'))
         df = pd.read_csv(ORIG_TWEET_FILE)
         filen = "default file"
+    else:
+        print('Invalid content: -->{}<---.... We are reverting to the default dataset now'.format(contents))
+        df = pd.read_csv(ORIG_TWEET_FILE)
+        filen = "default file"
+        results = html.P("Error. The text field should be named *text* \
+                          Using the default datas", style=dict(color='red'))
+
     try:
         df['loc']=df['loc'].astype(str)
     except Exception as e:
         print("Exception: {} : No location attribute in the dataset".format(e))
+    try:
+        df['created_at'] = pd.to_datetime(df.created_at).dt.date
+    except Exception as e:
+        print("Exception: -->{}<-- Problems converting to datatime".format(e))
 
     #######
     ### Check the language of the text and only use the text in english
     ### You could do that here before proceeding with the input data
     ####
     global all_tweets_df
+    global cleaned_tweets_df
     df['text'] = df['text'].astype(str)
     all_tweets_df = df.copy(deep=True)
     # Preprocess tweets
@@ -938,13 +943,13 @@ def preprocess_data(contents,filename):
     total_tweets= html.P("Total Number of Tweets: {}".format(cleaned_tweets_df.shape[0]))
     size_df = round(cleaned_tweets_df.memory_usage(index=True, deep=True).sum()/10**6, 2)
     dataframe_size = html.P("Size of dataframe: {}MB".format(size_df))
-    try:
-        tweets_per_country = html.Div([
-                                html.P('Tweets from France: {}'.format(fr_df.shape[0])),
-                                html.P('Tweets from USA: {}'.format(us_df.shape[0]))
-                            ])
-    except Exception as e:
-        tweets_per_country = html.P('Location not found in the dataset. The location field should be named *loc*')
+    # try:
+    #     tweets_per_country = html.Div([
+    #                             html.P('Tweets from France: {}'.format(fr_df.shape[0])),
+    #                             html.P('Tweets from USA: {}'.format(us_df.shape[0]))
+    #                         ])
+    # except Exception as e:
+    #     tweets_per_country = html.P('Location not found in the dataset. The location field should be named *loc*')
 
     try:
         devices = cleaned_tweets_df.groupby(['source'])['source'].count().reset_index(name='count')
@@ -964,13 +969,15 @@ def preprocess_data(contents,filename):
                 )})
     except Exception as e:
         source_bar = html.P('No column in your dataset lists the device type used for the tweet')
-        print("Error-->{}<--".format(e))
+        print("Exception:-->{}<--No column in your dataset lists the device type used for the tweet\n".format(e))
 
     if filen == "default file":
         results = html.P("Preprocessing completed and now using the default dataset", style=dict(color='blue'))
     else:
         results = html.P('Preprocessing {} completed and now using it'.format(filen), style=dict(color='royalblue'))
-    return results, daily_bar,source_bar,total_tweets, dataframe_size, tweets_per_country
+    print("Data preprocessing completed successfully")
+    return results, daily_bar,source_bar,total_tweets, dataframe_size
+    #return results, daily_bar,source_bar,total_tweets, dataframe_size, tweets_per_country
 
 @app.callback(
     Output('output-data-upload', 'children'),
@@ -1130,7 +1137,7 @@ def save_new_topics_name(n1, n2, values, id, is_open):
             body = html.P('Topics successfully renamed')
             return results, not is_open, heading, body
         except Exception as e:
-            print('Error:-{}- in callback save_new_topics_name'.format(e))
+            print('Exception:-{}- in callback save_new_topics_name'.format(e))
             results = html.P('Error updating topics')
             heading = html.P('Failure')
             body = html.P('Error: {}'.format(e))
@@ -1223,7 +1230,8 @@ def toggle_simple_model_modal(n1,n2, is_open):
                                                         bubble chart in one of the boxes on this page."
 
 @app.callback(
-    Output(component_id='topics_vis_div', component_property="children"),
+    [Output(component_id='topics_vis_div', component_property="children"),
+    Output(component_id='eval_metrics', component_property="children")],
     [Input(component_id='submit-model', component_property='n_clicks')],
     [State(component_id='number_topics', component_property='value'),
     State(component_id='alpha_value', component_property='value'),
@@ -1235,6 +1243,7 @@ def run_simple_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value)
             print('Start Simple LDA model training ...\n')
             global corpus
             global loaded_dict
+            global cleaned_tweets_df
 
             ldamodel = models.LdaMulticore(corpus=corpus,
                                              num_topics=n_topics,
@@ -1244,11 +1253,25 @@ def run_simple_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value)
                                              eta=eta_value,
                                              minimum_probability = min_prob_value,
                                              random_state=49)
+
+            #### Evaluate Model: Perplexity and Coherence
+            perplexity = round(ldamodel.log_perplexity(corpus),2)
+            print('\nPerplexity: ', perplexity)
+            # Compute Coherence Score
+            coherence_model_lda = CoherenceModel(model=ldamodel, texts=cleaned_tweets_df['ngram_token'],
+                                                 dictionary=loaded_dict, coherence='c_v')
+            coherence_score = round(coherence_model_lda.get_coherence(),2)
+            print('\nCoherence: ',coherence_score )
+            performance = html.Div([
+                                html.B(html.P('Metrics', style=dict(color='red'))),
+                                html.P("Perplexity = {}".format(perplexity)),
+                                html.P('Coherence score = {}'.format(coherence_score))
+                        ], style=dict(marginLeft='80px', marginTop='10px'))
+
             # Save LDA model to file
             ldamodel.save(LDA_MODEL_FILE)
             global lda_model
             lda_model= ldamodel
-            print ('LDA model saved\n')
             lda_data =  pyLDAvis.gensim.prepare(ldamodel, corpus, loaded_dict, mds='mmds')
             topic_coordinates = lda_data.topic_coordinates
             token_table = lda_data.token_table
@@ -1289,13 +1312,34 @@ def run_simple_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value)
                 ))
             ####### Getting sentiment and prediction of topic
             global all_tweets_df
-            print(all_tweets_df.columns)
-            print('Trying to use spark..... -> In function run_simple_model')
+            #print(all_tweets_df.columns)
+            print('Using spark to execute sentiment analysis and getting the polarity and subjectivity of tweets\n')
             spark_df = spark.createDataFrame(all_tweets_df)
             polarity_df = spark_df.withColumn("polarity_label", udf_polarity_label(spark_df.text))
+            polarity_df = polarity_df.withColumn("polarity_val", udf_get_polarity(polarity_df.text))
             sub_df = polarity_df.withColumn("sub_label", udf_subj_label(polarity_df.text))
+            sub_df = sub_df.withColumn("sub_val", udf_get_subj(sub_df.text))
             global polarity_topics_df
             polarity_topics_df = sub_df.toPandas()
+
+            #### Group polarity and subjectivity by state
+            print("Computing overall polarity per state")
+            polarity= polarity_topics_df.groupby('loc')["polarity_val"].mean().reset_index(name='avg_pol')
+            print('Done computing polarity by state')
+            subj= polarity_topics_df.groupby('loc')["sub_val"].mean().reset_index(name='avg_sub')
+            print('Done computing subjectivity by state')
+            locations = polarity_topics_df.groupby('loc')['loc'].count().reset_index(name='loc_count')
+            global sentiment_df
+            print('Now creating the dataframe of sentiments')
+            sentiment_df=pd.DataFrame({'loc':locations['loc'],
+                                       'count':locations['loc_count'],
+                                       'polarity':polarity['avg_pol'],
+                                       'subjectivity':subj['avg_sub']})
+            sentiment_df.to_csv(DATA_PATH+'sentiment.csv',index=False)
+            print('Done creating the dataframe of sentiments')
+            ####
+
+            ### Classify tweets under the created topics
             #print(polarity_topics_df.head())
             #global lda_model
             #global corpus
@@ -1313,13 +1357,14 @@ def run_simple_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value)
             polarity_topics_df['predicted_topic'] = pred_list
             ## polarity_topics_df contains overall polarity - worldwide
             polarity_topics_df.to_csv('polarity_topic.csv', index=False)
+
             #print(polarity_topics_df.head())
             global WORLD_DF_pol
             global WORLD_DF_sub
             WORLD_DF_pol = polarity_topics_df.groupby(['polarity_label'])['polarity_label'].count().reset_index(name='count')
             WORLD_DF_sub = polarity_topics_df.groupby(['sub_label'])['sub_label'].count().reset_index(name='count')
         except Exception as e:
-            print('Error:-{}- in function run_simple_model'.format(e))
+            print('Exception:-{}- in function run_simple_model'.format(e))
             figure = dict(
                     data = [go.Scatter(
                                 x=[],
@@ -1351,7 +1396,7 @@ def run_simple_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value)
             US_DF_sub = US_DF.groupby(['sub_label'])['sub_label'].count().reset_index(name='count')
             US_DF.to_csv(US_OUTPUT_FILE, index=False)
         except Exception as e:
-            print('Error:-->{}<--A column(loc) for the location of the user is surely missing in the dataset'.format(e))
+            print('Exception:-->{}<--A column(loc) for the location of the user is surely missing in the dataset'.format(e))
         ####################################################
 
         ####### Grouping polarity by topics
@@ -1387,7 +1432,7 @@ def run_simple_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value)
         topics_subj_df = subj_result_df
         print ('Topic visual saved\n')
         graph = dcc.Graph(id='topics_vis', figure=figure)
-    return graph
+    return graph, performance
 
 @app.callback(
     Output(component_id='pylda-status', component_property="children"),
@@ -1411,6 +1456,8 @@ def run_general_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value
                                                  eta=eta_value,
                                                  minimum_probability = min_prob_value,
                                                  random_state=49)
+            print('\nPerplexity: ', ldamodel.log_perplexity(corpus))
+
             lda_data =  pyLDAvis.gensim.prepare(ldamodel, corpus, loaded_dict, mds='mmds')
             global lda_model
             lda_model = ldamodel
@@ -1451,7 +1498,7 @@ def run_general_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value
             WORLD_DF_pol = polarity_topics_df.groupby(['polarity_label'])['polarity_label'].count().reset_index(name='count')
             WORLD_DF_sub = polarity_topics_df.groupby(['sub_label'])['sub_label'].count().reset_index(name='count')
         except Exception as e:
-            print('Error:-{}- in callback run_general_model')
+            print('Exception:-{}- in callback run_general_model')
             print('We have some problems runnning the model: {}'.format(e))
             results = html.P('We have some problems runnning the model: {}'.format(e), style=dict(color='red'))
 
@@ -1476,8 +1523,8 @@ def run_general_model(n_clicks, n_topics, alpha_value, eta_value, min_prob_value
             FR_DF.to_csv(FR_OUTPUT_FILE, index=False)
             US_DF.to_csv(US_OUTPUT_FILE, index=False)
         except Exception as e:
-            print('Error-->{}<--No column in the dataset lists the location of user'.format(e))
-            results = html.P('Error-->{}<--No column in the dataset lists the location of user'.format(e), style=dict(color='red'))
+            print('Exception:-->{}<--No column in the dataset lists the location of user'.format(e))
+            results = html.P('Exception:-->{}<--No column in the dataset lists the location of user'.format(e), style=dict(color='red'))
 
 
         ####### Grouping polarity by topics
@@ -1577,7 +1624,6 @@ def country_dropdown(country):
     global FR_DF_sub
     if country == 'France':
         try:
-            print(FR_DF_pol.columns)
             fr_polarity = FR_DF_pol['polarity_label']
             sentiment = html.Div([
                                 dbc.Row([
@@ -1590,7 +1636,8 @@ def country_dropdown(country):
                                                 'data': [{
                                                     'x': FR_DF_pol['polarity_label'],
                                                     'y': FR_DF_pol['count'],
-                                                    'type': 'bar'
+                                                    'type': 'bar',
+                                                    'marker_color':[color for color in ['red', 'green', 'blue']]
                                                 }],
                                                 'layout' : go.Layout(
                                                         yaxis = {'title': 'Number of tweets'},
@@ -1615,7 +1662,7 @@ def country_dropdown(country):
                             ])
         except Exception as e:
             sentiment = html.Div('Error:-->{}<--No location data for France'.format(e))
-            print('Error:-->{}<--No location data for France'.format(e))
+            print('Exception:-->{}<--No location data for France'.format(e))
 
 
     elif country == "World":
@@ -1652,15 +1699,54 @@ def country_dropdown(country):
                                                         yaxis = {'title': 'Number of tweets'},
                                                         xaxis = {'title': 'Subjectivity'},
                                     )}))
-                                ])
+                                ]),
+                            # dbc.Row([
+                            #     dbc.Col(
+                            #         dcc.Graph(
+                            #             id='polarity_map',
+                            #             style=dict( border='10'),
+                            #             #config=dict(staticPlot=True),
+                            #             figure = dict(
+                            #                 data = [go.Choropleth(
+                            #                             locations=sentiment_df['loc'], # Spatial coordinates
+                            #                             z = sentiment_df['polarity'].astype(float), # Data to be color-coded
+                            #                             locationmode = 'USA-states', # set of locations match entries in `locations`
+                            #                             colorscale = 'Reds',
+                            #                             colorbar_title = "Tweets polarity",
+                            #                             text=sentiment_df.apply(lambda row: f"{row['loc']}<br>{row['count']}<br>{row['polarity']}", axis=1),
+                            #                             hoverinfo="text"
+                            #                 )],
+                            #                 layout = go.Layout(
+                            #                         title = 'USA 05/03/2020 Corona Tweets polarity by State',
+                            #                         geo_scope='usa', # limite map scope to USA
+                            #                 )))),
+                            #     dbc.Col(
+                            #         dcc.Graph(
+                            #             id='subjectivity_map',
+                            #             style=dict( border='10'),
+                            #             #config=dict(staticPlot=True),
+                            #             figure = dict(
+                            #                 data = [go.Choropleth(
+                            #                             locations=sentiment_df['loc'], # Spatial coordinates
+                            #                             z = sentiment_df['subjectivity'].astype(float), # Data to be color-coded
+                            #                             locationmode = 'USA-states', # set of locations match entries in `locations`
+                            #                             colorscale = 'Reds',
+                            #                             colorbar_title = "Tweets subjectivity",
+                            #                             text=sentiment_df.apply(lambda row: f"{row['loc']}<br>{row['count']}<br>{row['subjectivity']}", axis=1),
+                            #                             hoverinfo="text"
+                            #                 )],
+                            #                 layout = go.Layout(
+                            #                         title = 'USA 05/03/2020 Corona Tweets subjectivity by State',
+                            #                         geo_scope='usa', # limite map scope to USA
+                            #         ))))
+                            #     ])
                             ])
         except Exception as e:
             sentiment = html.Div('Error:{}'.format(e))
-            print("Error {}".format(e))
+            print("Exception: {}<--- In function country dropdown".format(e))
 
     else :
         try:
-            print(US_DF_pol.columns)
             usa_polarity = US_DF_pol['polarity_label']
             sentiment = html.Div([
                                 dbc.Row([
@@ -1698,17 +1784,16 @@ def country_dropdown(country):
                             ])
         except Exception as e:
             sentiment = html.Div('Error:-->{}<--No Location data for USA'.format(e))
-            print('Error:-->{}<--No Location data for USA'.format(e))
+            print('Exception:-->{}<--No Location data for USA'.format(e))
 
 
     try:
+        # Check if the user had rename the topics
         if "topic_name" in polarity_topics_df.columns:
-            print("topic_name exist in the dataset")
             options = polarity_topics_df["topic_name"].unique()
             global topics_names_exist
             #topics_names_exist = True
         else:
-            print("topic_name doesn't exist in the dataset")
             options = polarity_topics_df['predicted_topic'].unique()
         div2=  html.Div([
                     dcc.Dropdown(
@@ -1718,15 +1803,17 @@ def country_dropdown(country):
                         style={'marginLeft':'30px', "marginBottom":"5px",'width':'100%'}
                         ),
                     html.Div(id='sentiment_topic_output'),
-                ], style=dict( width="1500px", height="790px"))
+                ], style=dict( width="800px", height="300px"))
         #return div1,div2
     except Exception as e:
-        print('Error {} --> In function country_dropdown'.format(e))
+        print('Exception: {} --> In function country_dropdown'.format(e))
     return sentiment,div2
 
 
-        # div1=  html.Div(
-        #         [dbc.Row([
+        # div1=  html.Div([
+        #
+        #
+        #         dbc.Row([
         #             dbc.Col(
         #                 dcc.Graph(
         #                     id='polarity_map',
@@ -1764,7 +1851,9 @@ def country_dropdown(country):
         #                         layout = go.Layout(
         #                                 title = 'USA 05/03/2020 Corona Tweets subjectivity by State',
         #                                 geo_scope='usa', # limite map scope to USA
-        #                 ))))])])
+        #                 ))))
+        #             ])
+        #         ])
 
 
 @app.callback(
@@ -1774,10 +1863,9 @@ def country_dropdown(country):
 def sentiment_topics_pie(topic):
     global renamed_topics_polarity_df
     global renamed_topics_subj_df
+    # Check if the user had rename the topics
     if 'predicted_topic' in renamed_topics_polarity_df.columns:
         try:
-            print(renamed_topics_polarity_df.head())
-            print(renamed_topics_subj_df.head())
             pol_mask = renamed_topics_polarity_df['predicted_topic'] == topic
             subj_mask = renamed_topics_subj_df['predicted_topic'] == topic
             polDf = renamed_topics_polarity_df[pol_mask]
@@ -1796,16 +1884,15 @@ def sentiment_topics_pie(topic):
                                          ])
             graph =  dcc.Graph(figure=fig)
         except Exception as e:
-            print('Error: {} ---> In function to plot pie chart'.format(e))
+            print('Exception: {} ---> In function to plot pie chart'.format(e))
             graph = html.P("Error: {}".format(e))
     else:
         try:
-            print("topic name doesn't exist in dataset renamed_topics_polarity_df")
             pol_mask = topics_polarity_df['predicted_topic'] == topic
             subj_mask = topics_subj_df['predicted_topic'] == topic
             polDf = topics_polarity_df[pol_mask]
             subjDf = topics_subj_df[subj_mask]
-            print('I am here in the function to plot the pie chart')
+            print('Plotting the pie chart of topics')
             # Source: https://plotly.com/python/pie-charts/
             # Create subplots: use 'domain' type for Pie subplot
             fig = make_subplots(rows=1, cols=2, specs=[[{'type':'domain'}, {'type':'domain'}]])
@@ -1820,7 +1907,7 @@ def sentiment_topics_pie(topic):
                                          ])
             graph =  dcc.Graph(figure=fig)
         except Exception as e:
-            print('Error: {} ---> In function to plot pie chart'.format(e))
+            print('Exception: {} ---> In function to plot pie chart'.format(e))
             graph = html.P("Error: {}".format(e))
     return graph
 
@@ -1831,27 +1918,46 @@ def sentiment_topics_pie(topic):
 )
 def user_map_dropdown(country):
     if country == 'France':
-        return html.P('No data to display for the moment. We are sorry!', style=dict(marginLeft=60, marginTop=10, color='red'))
+        map =  html.P('No data to display for the moment. We are sorry!',
+                        style=dict(marginLeft=60, marginTop=10, color='red'))
     else:
-        return dcc.Graph(
-                        id='graph-2-tabs',
-                        style=dict( border='10'),
-                        #config=dict(staticPlot=True),
-                        figure = dict(
-                            data = [go.Choropleth(
-                                        locations=locations['loc'], # Spatial coordinates
-                                        z = locations['Count'].astype(float), # Data to be color-coded
-                                        locationmode = 'USA-states', # set of locations match entries in `locations`
-                                        colorscale = 'Reds',
-                                        colorbar_title = "Tweets count",
-                            )],
-                            layout = go.Layout(
-                                    title = 'USA 05/03/2020 Corona Tweets by State',
-                                    geo_scope='usa', # limite map scope to USA
-                            )))
-
+        map = html.Div([
+                dbc.Row(
+                    [dbc.Col(dcc.Graph(
+                                id='graph-2-tabs',
+                                style=dict( border='10'),
+                                #config=dict(staticPlot=True),
+                                figure = dict(
+                                    data = [go.Choropleth(
+                                                locations=sentiment_df['loc'], # Spatial coordinates
+                                                z = sentiment_df['count'].astype(float), # Data to be color-coded
+                                                locationmode = 'USA-states', # set of locations match entries in `locations`
+                                                colorscale = 'Reds',
+                                                colorbar_title = "Tweets count",
+                                    )],
+                                    layout = go.Layout(
+                                            title = 'USA 05/03/2020 Corona Tweets by State',
+                                            geo_scope='usa', # limite map scope to USA
+                    )))),
+                    dbc.Col(dcc.Graph(
+                                id='tweet_mapping_states',
+                                #style=dict(width='60'),
+                                #config=dict(staticPlot=True),
+                                figure={
+                                    'data': [{
+                                        'x': sentiment_df['loc'],
+                                        'y': sentiment_df['count'],
+                                        'type': 'bar'
+                                    }],
+                                    'layout' : go.Layout(
+                                            yaxis = {'title': 'Number of tweets'},
+                                            xaxis = {'title': 'State'},
+                    )}))
+                ]),
+            ])
+    return map
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True, port=8050)
-    #app.run_server(debug=True,dev_tools_ui=False,dev_tools_props_check=False)
+    #app.run_server(debug=True, port=8050)
+    app.run_server(debug=True,port=8050,dev_tools_ui=False,dev_tools_props_check=False)
