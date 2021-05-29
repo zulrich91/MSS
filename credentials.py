@@ -4,6 +4,6 @@ API_KEY = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 API_SECRET_KEY = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # After the step above, you will be redirected to your app's page.
-# Create an access token under the the "Your access token" section
-ACCESS_TOEKN = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# Create an access token under the "Your access token" section
+ACCESS_TOKEN = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ACCESS_TOKEN_SECRET = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
